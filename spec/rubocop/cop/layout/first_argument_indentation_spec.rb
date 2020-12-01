@@ -64,7 +64,7 @@ RSpec.describe RuboCop::Cop::Layout::FirstArgumentIndentation, :config do
         RUBY
 
         # The first `)` Will be corrected by IndentationConsistency.
-        expect_correction(<<~RUBY)
+        expect_correction(<<~RUBY, loop: false)
           foo(
             bar(
              7
@@ -481,7 +481,7 @@ RSpec.describe RuboCop::Cop::Layout::FirstArgumentIndentation, :config do
         RUBY
 
         # The first `)` Will be corrected by IndentationConsistency.
-        expect_correction(<<~RUBY)
+        expect_correction(<<~RUBY, loop: false)
           foo(
             bar(
              7
@@ -540,6 +540,28 @@ RSpec.describe RuboCop::Cop::Layout::FirstArgumentIndentation, :config do
         expect_no_offenses(<<~RUBY)
           run :foo,
               bar: 3
+        RUBY
+      end
+
+      it 'does not register an offense when argument has expected indent width and ' \
+         'the method is preceded by splat' do
+        expect_no_offenses(<<~RUBY)
+          [
+            item,
+            *do_something(
+              arg)
+          ]
+        RUBY
+      end
+
+      it 'does not register an offense when argument has expected indent width and ' \
+         'the method is preceded by double splat' do
+        expect_no_offenses(<<~RUBY)
+          [
+            item,
+            **do_something(
+              arg)
+          ]
         RUBY
       end
 

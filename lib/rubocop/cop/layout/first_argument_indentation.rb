@@ -7,7 +7,7 @@ module RuboCop
       # Arguments after the first one are checked by Layout/ArgumentAlignment,
       # not by this cop.
       #
-      # For indenting the first parameter of method *definitions*, check out
+      # For indenting the first parameter of method _definitions_, check out
       # Layout/FirstParameterIndentation.
       #
       # @example
@@ -168,7 +168,7 @@ module RuboCop
 
           send_node = arg_node.parent
           text = base_range(send_node, arg_node).source.strip
-          base = if text !~ /\n/ && special_inner_call_indentation?(send_node)
+          base = if !/\n/.match?(text) && special_inner_call_indentation?(send_node)
                    "`#{text}`"
                  elsif comment_line?(text.lines.reverse_each.first)
                    'the start of the previous line (not counting the comment)'
@@ -207,8 +207,13 @@ module RuboCop
         PATTERN
 
         def base_range(send_node, arg_node)
-          range_between(send_node.source_range.begin_pos,
-                        arg_node.source_range.begin_pos)
+          parent = send_node.parent
+          start_node = if parent && (parent.splat_type? || parent.kwsplat_type?)
+                         send_node.parent
+                       else
+                         send_node
+                       end
+          range_between(start_node.source_range.begin_pos, arg_node.source_range.begin_pos)
         end
 
         # Returns the column of the given range. For single line ranges, this
@@ -240,6 +245,10 @@ module RuboCop
             .comments
             .select { |c| begins_its_line?(c.loc.expression) }
             .map { |c| c.loc.line }
+        end
+
+        def on_new_investigation
+          @comment_lines = nil
         end
       end
     end

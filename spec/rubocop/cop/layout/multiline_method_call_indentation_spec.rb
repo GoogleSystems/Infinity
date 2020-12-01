@@ -459,7 +459,7 @@ RSpec.describe RuboCop::Cop::Layout::MultilineMethodCallIndentation do
     end
 
     it 'does not check binary operations when string wrapped with backslash' do
-      expect_no_offenses(<<~RUBY)
+      expect_no_offenses(<<~'RUBY')
         flash[:error] = 'Here is a string ' \
                         'That spans' <<
           'multiple lines'
@@ -798,6 +798,23 @@ RSpec.describe RuboCop::Cop::Layout::MultilineMethodCallIndentation do
       RUBY
     end
 
+    it 'registers an offense and corrects 0 space indentation inside square brackets' do
+      expect_offense(<<~RUBY)
+        foo[
+          bar
+          .baz
+          ^^^^ Use 2 (not 0) spaces for indenting an expression spanning multiple lines.
+        ]
+      RUBY
+
+      expect_correction(<<~RUBY)
+        foo[
+          bar
+            .baz
+        ]
+      RUBY
+    end
+
     it 'registers an offense and corrects aligned methods in if condition' do
       expect_offense(<<~RUBY)
         if a.
@@ -881,7 +898,7 @@ RSpec.describe RuboCop::Cop::Layout::MultilineMethodCallIndentation do
         expect_no_offenses(<<~RUBY)
           return #{keyword} receiver.nil? &&
               !args.empty? &&
-              BLACKLIST.include?(method_name)
+              FORBIDDEN_METHODS.include?(method_name)
         RUBY
       end
     end
@@ -910,16 +927,30 @@ RSpec.describe RuboCop::Cop::Layout::MultilineMethodCallIndentation do
       RUBY
     end
 
-    it 'accepts indentation of assignment' do
-      expect_no_offenses(<<~RUBY)
-        formatted_int = int_part
-          .abs
-          .to_s
-          .reverse
-          .gsub(/...(?=.)/, '&_')
-          .reverse
-      RUBY
+    shared_examples 'assignment' do |lhs|
+      it "accepts indentation of assignment to #{lhs} with rhs on same line" do
+        expect_no_offenses(<<~RUBY)
+          #{lhs} = int_part
+            .abs
+            .to_s
+            .reverse
+            .gsub(/...(?=.)/, '&_')
+            .reverse
+        RUBY
+      end
+
+      it "accepts indentation of assignment to #{lhs} with newline after =" do
+        expect_no_offenses(<<~RUBY)
+          #{lhs} =
+            int_part
+              .abs
+              .to_s
+        RUBY
+      end
     end
+
+    include_examples 'assignment', 'a'
+    include_examples 'assignment', 'a[:key]'
 
     it 'registers an offense and corrects correct + unrecognized style' do
       expect_offense(<<~RUBY)

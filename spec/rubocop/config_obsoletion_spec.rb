@@ -9,8 +9,6 @@ RSpec.describe RuboCop::ConfigObsoletion do
   let(:loaded_path) { 'example/.rubocop.yml' }
 
   describe '#validate', :isolated_environment do
-    let(:configuration_path) { '.rubocop.yml' }
-
     context 'when the configuration includes any obsolete cop name' do
       let(:hash) do
         {
@@ -69,9 +67,10 @@ RSpec.describe RuboCop::ConfigObsoletion do
           'Layout/SpaceAfterControlKeyword' => { 'Enabled': true },
           'Layout/SpaceBeforeModifierKeyword' => { 'Enabled': true },
           'Lint/InvalidCharacterLiteral' => { 'Enabled': true },
+          'Style/MethodMissingSuper' => { 'Enabled': true },
+          'Lint/UselessComparison' => { 'Enabled': true },
           'Lint/RescueWithoutErrorClass' => { 'Enabled': true },
           'Lint/SpaceBeforeFirstArg' => { 'Enabled': true },
-          'Rails/DefaultScope' => { 'Enabled': true },
           'Style/SpaceAfterControlKeyword' => { 'Enabled': true },
           'Style/SpaceBeforeModifierKeyword' => { 'Enabled': true },
           'Style/TrailingComma' => { 'Enabled': true },
@@ -185,8 +184,6 @@ RSpec.describe RuboCop::ConfigObsoletion do
           (obsolete configuration found in example/.rubocop.yml, please update it)
           The `Lint/RescueWithoutErrorClass` cop has been removed. Please use `Style/RescueStandardError` instead.
           (obsolete configuration found in example/.rubocop.yml, please update it)
-          The `Rails/DefaultScope` cop has been removed.
-          (obsolete configuration found in example/.rubocop.yml, please update it)
           The `Style/SpaceAfterControlKeyword` cop has been removed. Please use `Layout/SpaceAroundKeyword` instead.
           (obsolete configuration found in example/.rubocop.yml, please update it)
           The `Style/SpaceBeforeModifierKeyword` cop has been removed. Please use `Layout/SpaceAroundKeyword` instead.
@@ -198,6 +195,10 @@ RSpec.describe RuboCop::ConfigObsoletion do
           The `Lint/InvalidCharacterLiteral` cop has been removed since it was never being actually triggered.
           (obsolete configuration found in example/.rubocop.yml, please update it)
           The `Lint/SpaceBeforeFirstArg` cop has been removed since it was a duplicate of `Layout/SpaceBeforeFirstArg`. Please use `Layout/SpaceBeforeFirstArg` instead.
+          (obsolete configuration found in example/.rubocop.yml, please update it)
+          The `Style/MethodMissingSuper` cop has been removed since it has been superseded by `Lint/MissingSuper`. Please use `Lint/MissingSuper` instead.
+          (obsolete configuration found in example/.rubocop.yml, please update it)
+          The `Lint/UselessComparison` cop has been removed since it has been superseded by `Lint/BinaryOperatorWithIdenticalOperands`. Please use `Lint/BinaryOperatorWithIdenticalOperands` instead.
           (obsolete configuration found in example/.rubocop.yml, please update it)
           The `Style/MethodMissing` cop has been split into `Style/MethodMissingSuper` and `Style/MissingRespondToMissing`.
           (obsolete configuration found in example/.rubocop.yml, please update it)
@@ -288,13 +289,44 @@ RSpec.describe RuboCop::ConfigObsoletion do
         OUTPUT
       end
 
-      it 'prints a warning message' do
+      it 'prints a error message' do
         begin
           config_obsoletion.reject_obsolete_cops_and_parameters
           raise 'Expected a RuboCop::ValidationError'
         rescue RuboCop::ValidationError => e
           expect(expected_message).to eq(e.message)
         end
+      end
+    end
+
+    context 'when the configuration includes any deprecated parameters' do
+      let(:hash) do
+        {
+          'Metrics/BlockLength' => {
+            'ExcludedMethods' => %w[foo bar]
+          },
+          'Metrics/MethodLength' => {
+            'ExcludedMethods' => %w[foo bar]
+          }
+        }
+      end
+
+      let(:warning_message)  { config_obsoletion.warnings.join("\n") }
+
+      let(:expected_message) do
+        <<~OUTPUT.chomp
+          obsolete parameter ExcludedMethods (for Metrics/BlockLength) found in example/.rubocop.yml
+          `ExcludedMethods` has been renamed to `IgnoredMethods`.
+          obsolete parameter ExcludedMethods (for Metrics/MethodLength) found in example/.rubocop.yml
+          `ExcludedMethods` has been renamed to `IgnoredMethods`.
+        OUTPUT
+      end
+
+      it 'prints a warning message' do
+        expect { config_obsoletion.reject_obsolete_cops_and_parameters }
+          .not_to raise_error(RuboCop::ValidationError)
+
+        expect(warning_message).to eq(expected_message)
       end
     end
   end

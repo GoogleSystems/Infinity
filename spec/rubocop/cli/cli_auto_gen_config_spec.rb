@@ -3,9 +3,9 @@
 require 'timeout'
 
 RSpec.describe RuboCop::CLI, :isolated_environment do
-  include_context 'cli spec behavior'
-
   subject(:cli) { described_class.new }
+
+  include_context 'cli spec behavior'
 
   describe '--auto-gen-config' do
     before do
@@ -441,6 +441,47 @@ RSpec.describe RuboCop::CLI, :isolated_environment do
       end
     end
 
+    context 'when working with a cop who do not support auto-correction' do
+      it 'can generate a todo list' do
+        create_file('example1.rb', <<~RUBY)
+          def fooBar; end
+        RUBY
+        create_file('.rubocop.yml', <<~YAML)
+          # The following cop does not support auto-correction.
+          Naming/MethodName:
+            Enabled: true
+        YAML
+        expect(cli.run(%w[--auto-gen-config])).to eq(0)
+        expect($stderr.string).to eq('')
+        # expect($stdout.string).to include('Created .rubocop_todo.yml.')
+        expect(Dir['.*']).to include('.rubocop_todo.yml')
+        todo_contents = IO.read('.rubocop_todo.yml').lines[8..-1].join
+        expect(todo_contents).to eq(<<~YAML)
+          # Offense count: 1
+          # Configuration parameters: EnforcedStyle, IgnoredPatterns.
+          # SupportedStyles: snake_case, camelCase
+          Naming/MethodName:
+            Exclude:
+              - 'example1.rb'
+
+          # Offense count: 1
+          # Cop supports --auto-correct.
+          # Configuration parameters: EnforcedStyle.
+          # SupportedStyles: always, always_true, never
+          Style/FrozenStringLiteralComment:
+            Exclude:
+              - 'example1.rb'
+        YAML
+        expect(IO.read('.rubocop.yml')).to eq(<<~YAML)
+          inherit_from: .rubocop_todo.yml
+
+          # The following cop does not support auto-correction.
+          Naming/MethodName:
+            Enabled: true
+        YAML
+      end
+    end
+
     context 'when working in a subdirectory' do
       it 'can generate a todo list' do
         create_file('dir/example1.rb', ['$x = 0 ',
@@ -456,7 +497,7 @@ RSpec.describe RuboCop::CLI, :isolated_environment do
           Layout/LineLength:
             Max: 95
         YAML
-        RuboCop::PathUtil.chdir('dir') do
+        Dir.chdir('dir') do
           expect(cli.run(%w[--auto-gen-config])).to eq(0)
         end
         expect($stderr.string).to eq('')
@@ -743,6 +784,79 @@ RSpec.describe RuboCop::CLI, :isolated_environment do
       expect(actual.size).to eq(expected.size)
     end
 
+    context 'for existing configuration with Exclude' do
+      before do
+        create_file('example1.rb', ['# frozen_string_literal: true',
+                                    '',
+                                    'y '])
+        create_file('example2.rb', ['# frozen_string_literal: true',
+                                    '',
+                                    'x = 0 ',
+                                    'puts x'])
+      end
+
+      it 'generates Excludes that appear in .rubocop.yml' do
+        create_file('.rubocop.yml', <<~YAML)
+          Layout/TrailingWhitespace:
+            Exclude:
+              - 'example1.rb'
+        YAML
+        expect(cli.run(['--auto-gen-config'])).to eq(0)
+        expect($stderr.string.chomp)
+          .to eq('`Layout/TrailingWhitespace: Exclude` in `.rubocop.yml` overrides a generated ' \
+                 '`Exclude` in `.rubocop_todo.yml`. Either remove ' \
+                 '`Layout/TrailingWhitespace: Exclude` or add `inherit_mode: merge: - Exclude`.')
+        expected = <<~YAML
+          Layout/TrailingWhitespace:
+            Exclude:
+              - 'example1.rb'
+              - 'example2.rb'
+        YAML
+        actual = IO.read('.rubocop_todo.yml').lines.reject { |line| line =~ /^(#.*)?$/ }
+        expect(actual.join).to eq(expected)
+
+        $stdout = StringIO.new
+        expect(cli.run(['--format', 'offenses'])).to eq(1)
+        expect($stdout.string.lines.grep(%r{/})).to eq(["1  Layout/TrailingWhitespace\n"])
+      end
+
+      shared_examples 'leaves out Excludes' do |merge_style, config|
+        it "leaves out Excludes that appear in .rubocop.yml but are merged #{merge_style}" do
+          create_file('.rubocop.yml', config)
+          expect(cli.run(['--auto-gen-config'])).to eq(0)
+          expect($stderr.string).to eq('')
+          expected = <<~YAML
+            Layout/TrailingWhitespace:
+              Exclude:
+                - 'example2.rb'
+          YAML
+          actual = IO.read('.rubocop_todo.yml').lines.reject { |line| line =~ /^(#.*)?$/ }
+          expect(actual.join).to eq(expected)
+
+          expect(cli.run([])).to eq(0)
+        end
+      end
+
+      include_examples 'leaves out Excludes', 'globally', <<~YAML
+        inherit_mode:
+          merge:
+            - Exclude
+
+        Layout/TrailingWhitespace:
+          Exclude:
+            - 'example1.rb'
+      YAML
+      include_examples 'leaves out Excludes', 'for the cop', <<~YAML
+        Layout/TrailingWhitespace:
+          inherit_mode:
+            merge:
+              - Exclude
+
+          Exclude:
+            - 'example1.rb'
+      YAML
+    end
+
     it 'does not generate configuration for the Syntax cop' do
       create_file('example1.rb', <<~RUBY)
         # frozen_string_literal: true
@@ -758,53 +872,45 @@ RSpec.describe RuboCop::CLI, :isolated_environment do
       RUBY
       expect(cli.run(['--auto-gen-config'])).to eq(0)
       expect($stderr.string).to eq('')
-      expected =
-        ['# This configuration was generated by',
-         '# `rubocop --auto-gen-config`',
-         /# on .* using RuboCop version .*/,
-         '# The point is for the user to remove these configuration records',
-         '# one by one as the offenses are removed from the code base.',
-         '# Note that changes in the inspected code, or installation of new',
-         '# versions of RuboCop, may require this file to be generated ' \
-         'again.',
-         '',
-         '# Offense count: 1',
-         '# Cop supports --auto-correct.',
-         'Layout/CommentIndentation:',
-         '  Exclude:',
-         "    - 'example2.rb'",
-         '',
-         '# Offense count: 1',
-         '# Cop supports --auto-correct.',
-         '# Configuration parameters: EnforcedStyle.',
-         '# SupportedStyles: normal, indented_internal_methods',
-         'Layout/IndentationConsistency:',
-         '  Exclude:',
-         "    - 'example2.rb'",
-         '',
-         '# Offense count: 1',
-         '# Cop supports --auto-correct.',
-         '# Configuration parameters: IndentationWidth, EnforcedStyle.',
-         '# SupportedStyles: spaces, tabs',
-         'Layout/IndentationStyle:',
-         '  Exclude:',
-         "    - 'example2.rb'",
-         '',
-         '# Offense count: 1',
-         '# Cop supports --auto-correct.',
-         'Layout/InitialIndentation:',
-         '  Exclude:',
-         "    - 'example2.rb'"]
       actual = IO.read('.rubocop_todo.yml').split($RS)
-      expect(actual.length).to eq(expected.length)
-      expected.each_with_index do |line, ix|
-        if line.is_a?(String)
-          expect(actual[ix]).to eq(line)
-        else
-          expect(actual[ix]).to match(line)
-        end
-      end
-      expect(actual.size).to eq(expected.size)
+      date_stamp = actual.slice!(2)
+      expect(date_stamp).to match(/# on .* using RuboCop version .*/)
+      expect(actual.join("\n")).to eq(<<~TEXT.chomp)
+        # This configuration was generated by
+        # `rubocop --auto-gen-config`
+        # The point is for the user to remove these configuration records
+        # one by one as the offenses are removed from the code base.
+        # Note that changes in the inspected code, or installation of new
+        # versions of RuboCop, may require this file to be generated again.
+
+        # Offense count: 1
+        # Cop supports --auto-correct.
+        Layout/CommentIndentation:
+          Exclude:
+            - 'example2.rb'
+
+        # Offense count: 1
+        # Cop supports --auto-correct.
+        # Configuration parameters: EnforcedStyle.
+        # SupportedStyles: normal, indented_internal_methods
+        Layout/IndentationConsistency:
+          Exclude:
+            - 'example2.rb'
+
+        # Offense count: 1
+        # Cop supports --auto-correct.
+        # Configuration parameters: IndentationWidth, EnforcedStyle.
+        # SupportedStyles: spaces, tabs
+        Layout/IndentationStyle:
+          Exclude:
+            - 'example2.rb'
+
+        # Offense count: 1
+        # Cop supports --auto-correct.
+        Layout/InitialIndentation:
+          Exclude:
+            - 'example2.rb'
+      TEXT
     end
 
     it 'generates a todo list that removes the reports' do
@@ -1078,7 +1184,7 @@ RSpec.describe RuboCop::CLI, :isolated_environment do
           Inspecting 1 file
           C
 
-          1 file inspected, 1 offense detected
+          1 file inspected, 1 offense detected, 1 offense auto-correctable
           Created .rubocop_todo.yml.
         OUTPUT
       end
